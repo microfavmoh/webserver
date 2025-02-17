@@ -130,7 +130,7 @@ int main() {
     int hash_element;
     int size_file_struct = sizeof(file_struct);
     file_struct* nav = NULL;
-    do {
+    while (FindNextFile(hFind, &data)) {
         if (*data.cFileName != '.') {
             if (data.dwFileAttributes == FILE_ATTRIBUTE_DIRECTORY) {
                 continue;
@@ -140,25 +140,37 @@ int main() {
                     continue;
                 }
                 webpage_element = fopen(data.cFileName, "rb");
-
                 if (!webpage_element) {
                     char* cleanup_array[] = { banned, http_header, NULL };
                     cleanup(&server_struct, cleanup_array, NULL, hFind, 1);
                     return 1;
                 } 
-                webpage_element_loaded = malloc(1);
+                while (fgetc(webpage_element) != EOF)
+                    webpage_element_size++;
+                if (!webpage_element_size)
+                    continue;
+                rewind(webpage_element);
+                http_header_size += (int) floor(log10(webpage_element_size));
+                total_size = webpage_element_size + http_header_size;
+                webpage_element_loaded = malloc(total_size);
                 if (!webpage_element_loaded) {
                     char* cleanup_array[] = { banned, http_header, NULL };
                     cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
+                    return 1;
                 }
-                while (fread(webpage_element_loaded + webpage_element_size, 1, 1, webpage_element)) {
-                    if (!(webpage_element_loaded = realloc(webpage_element_loaded,  webpage_element_size + 2))) {
-                        char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
-                        cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
-                    }
-                    webpage_element_size++;
+                webpage_element_loaded[total_size - 1] = '\0';
+                if (sprintf(webpage_element_loaded, http_header, webpage_element_size, "%s") < 0) {
+                    puts("couldn't format page size");
+                    char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
+                    cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
+                    return 1;
                 }
-                webpage_element_loaded[webpage_element_size] = '\0';
+                if (!fread(&webpage_element_loaded[http_header_size - 1], webpage_element_size, 1, webpage_element)) {
+                    char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
+                    cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
+                    return 1;
+                }
+                http_header_size -= (int)floor(log10(webpage_element_size));
                 if (!strcmp(data.cFileName, "index.html")) {
                     path = malloc(2);
                     if (!path) {
@@ -202,12 +214,12 @@ int main() {
                 }
                 else
                     server_struct.pages[hash_element] = file;
-                //add code to properly navigate through the hashmap and add file
                 fclose(webpage_element);
                 webpage_element_size = 0;
+                puts(webpage_element_loaded);
             }
         }
-    } while (FindNextFile(hFind, &data));
+    }
     int closed = 0;
     while (!closed)
         closed = FindClose(hFind);
