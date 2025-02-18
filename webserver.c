@@ -260,7 +260,6 @@ DWORD WINAPI manage_request(LPVOID manage_request_helper_received) {
     current_time[DATE_SIZE - 1] = '\0';
     time_t now = time(0);
     struct tm tm = *gmtime(&now);
-    puts("request accepted");
     strftime(current_time, sizeof(current_time), "%a, %d %b %Y %H:%M:%S %Z", &tm);
     char* page_requested_path;
     if (!(page_requested_path = strchr(request_buffer, '\n'))) {
