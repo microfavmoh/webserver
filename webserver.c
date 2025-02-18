@@ -147,8 +147,10 @@ int main() {
                 } 
                 while (fgetc(webpage_element) != EOF)
                     webpage_element_size++;
-                if (!webpage_element_size)
+                if (!webpage_element_size) {
+                    fclose(webpage_element);
                     continue;
+                }
                 rewind(webpage_element);
                 http_header_size += (int) floor(log10(webpage_element_size));
                 total_size = webpage_element_size + http_header_size;
@@ -216,7 +218,6 @@ int main() {
                     server_struct.pages[hash_element] = file;
                 fclose(webpage_element);
                 webpage_element_size = 0;
-                puts(webpage_element_loaded);
             }
         }
     }
@@ -229,13 +230,13 @@ int main() {
     int timeout = 2;
     fd_set set;
     FD_SET(server, &set);
-    TIMEVAL tv = {1, 0 };
+    TIMEVAL tv = {500, 0 };
     select(0, &set, NULL, NULL, &tv);
     setsockopt(server, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));;
     while (command != 'q') {
         HANDLE thread = CreateThread(NULL, 0, manage_request, &server_struct, 0, NULL);
     }
-    Sleep(10000);
+    Sleep(4000);
     char* cleanup_array[] = {http_header, banned};
     cleanup(&server_struct, cleanup_array, NULL, NULL, 1);
     return 0;
@@ -249,33 +250,49 @@ DWORD WINAPI manage_request(LPVOID manage_request_helper_received) {
     }
     char request_buffer[REQUEST_BUFFER_SIZE];
     request_buffer[0] = '\0';
-    request_buffer[REQUEST_BUFFER_SIZE - 1] = '\0';
     //null terminating request buffer and preventing it's content isn't already GET / by adding an extra NULL character
     if (recv(client, request_buffer, REQUEST_BUFFER_SIZE - 1, 0) <= 0) {
         puts("couldn't receive request or no request was received");
         goto close_socket_client;
     }
-    char* page_requested;
-    if (!(page_requested = strchr(request_buffer, '\n'))) {
-        goto close_socket_client;
-    }
-    *(page_requested - 10)= '\0';
-    page_requested = request_buffer + 4;
-    int hash_page_path = hash(page_requested, strlen(page_requested));
+    request_buffer[REQUEST_BUFFER_SIZE - 1] = '\0';
     char current_time[DATE_SIZE];
     current_time[DATE_SIZE - 1] = '\0';
     time_t now = time(0);
     struct tm tm = *gmtime(&now);
+    puts("request accepted");
     strftime(current_time, sizeof(current_time), "%a, %d %b %Y %H:%M:%S %Z", &tm);
-    int page_size = manage_request_helper_pointer->pages[hash_page_path]->file_size;
-    //add code to properly navigate through the hashmap and send file
+    char* page_requested_path;
+    if (!(page_requested_path = strchr(request_buffer, '\n'))) {
+        goto close_socket_client;
+    }
+    *(page_requested_path - 10) = '\0';
+    page_requested_path = request_buffer + 4;
+    int hash_page_path = hash(page_requested_path, strlen(page_requested_path));
+    file_struct *page_requested = manage_request_helper_pointer->pages[hash_page_path];
+    if (page_requested) {
+        while (strcmp(page_requested_path, page_requested -> path)) {
+            if (page_requested->next) {
+                page_requested = page_requested->next;
+            }
+            else {
+                goto close_socket_client;
+                //add code to send 404page
+            }
+        }
+    }
+    else {
+        goto close_socket_client;
+        //add code to send 404page
+    }
+    int page_size = page_requested->file_size;
     char* page_date = malloc(page_size);
     if (!page_date) {
         puts("couldn't allocate memory for page");
         goto close_socket_client;
     }
     page_date[page_size - 1] = '\0';
-    if (sprintf(page_date, manage_request_helper_pointer -> pages[hash_page_path]->file_content, current_time) < 0) {
+    if (sprintf(page_date, page_requested->file_content, current_time) < 0) {
         puts("couldn't format date");
         goto cleanup_label;
     }
