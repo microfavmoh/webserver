@@ -1,2 +1,2 @@
 # webserver
-A work in progress webserver wirtten in c note: the current version is bugged and isn't ready yet
+A work in progress webserver wirtten in c which has an average response time of about 100ms atleast that is on my 10 year-old laptop
