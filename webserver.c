@@ -24,7 +24,7 @@ typedef struct webserver {
 }webserver;
 
 DWORD WINAPI manage_request(LPVOID manage_request_helper_received);
-DWORD WINAPI server_command_line(LPVOID command);
+DWORD WINAPI server_command_line(LPVOID null);
 void cleanup(webserver *server_struct, char* buffer[], FILE* file, HANDLE* handle, int wsacleanup);
 unsigned int hash(void* key, int len);
 
@@ -129,17 +129,54 @@ int main() {
     file_struct* file = NULL;
     int hash_element;
     int size_file_struct = sizeof(file_struct);
+    // this pointer navigates through the hash map to put the file in the correct position
     file_struct* nav = NULL;
+    WIN32_FIND_DATAA sub_directory_data;
+    HANDLE sub_directory_handle;
+    //a path for a file inside the directory;
+    char* sub_directory_file_path;
+    char* sub_directory_path;
+    int len_sub_directory_name;
+    char *web_path_converter;
     while (FindNextFile(hFind, &data)) {
-        if (*data.cFileName != '.') {
-            if (data.dwFileAttributes == FILE_ATTRIBUTE_DIRECTORY) {
-                continue;
+        if (*data.cFileName == '.') {
+            continue;
+        }
+        if (data.dwFileAttributes == FILE_ATTRIBUTE_DIRECTORY) {
+            len_sub_directory_name = strlen(data.cFileName);
+            sub_directory_path = malloc(5 + len_sub_directory_name);
+            if (!sub_directory_path) {
+                char* cleanup_array[] = { banned, http_header, NULL };
+                cleanup(&server_struct, cleanup_array, NULL, hFind, 1);
+                return 1;
             }
-            else {
-                if (strstr(banned, data.cFileName)) {
+            strcpy(sub_directory_path, ".\\");
+            strcpy(sub_directory_path + 2, data.cFileName);
+            strcpy(sub_directory_path + len_sub_directory_name + 2, "\\*");
+            sub_directory_path[len_sub_directory_name + 4] = '\0';
+            sub_directory_handle = FindFirstFile(sub_directory_path, &sub_directory_data);
+            if (sub_directory_handle == INVALID_HANDLE_VALUE || sub_directory_handle == ERROR_FILE_NOT_FOUND) {
+                char* cleanup_array[] = { banned, http_header,sub_directory_path, NULL };
+                cleanup(&server_struct, cleanup_array, hFind, NULL, 1);
+                return 1;
+            }
+            free(sub_directory_path);
+            while (FindNextFile(sub_directory_handle, &sub_directory_data)) {
+                if (*sub_directory_data.cFileName == '.'){
                     continue;
                 }
-                webpage_element = fopen(data.cFileName, "rb");
+                if (strstr(banned, sub_directory_data.cFileName)) {
+                    continue;
+                }
+                sub_directory_file_path = malloc(strlen(sub_directory_data.cFileName) + len_sub_directory_name + 1);
+                sprintf(sub_directory_file_path, "%s\\%s", data.cFileName ,sub_directory_data.cFileName);
+                webpage_element = fopen(sub_directory_file_path, "r");
+                if (!webpage_element) {
+                    char* cleanup_array[] = { banned, http_header,sub_directory_file_path, NULL };
+                    cleanup(&server_struct, cleanup_array, hFind, NULL, 1);
+                    FindClose(sub_directory_handle);
+                    return 1;
+                }
                 if (!webpage_element) {
                     char* cleanup_array[] = { banned, http_header, NULL };
                     cleanup(&server_struct, cleanup_array, NULL, hFind, 1);
@@ -172,28 +209,13 @@ int main() {
                     cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
                     return 1;
                 }
+                fclose(webpage_element);
                 http_header_size -= (int)floor(log10(webpage_element_size));
-                if (!strcmp(data.cFileName, "index.html")) {
-                    path = malloc(2);
-                    if (!path) {
-                        char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
-                        cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
-                        return 1;
-                    }
-                    path[0] = '/';
-                    path[1] = '\0';
-                }
-                else {
-                    path = malloc(strlen(data.cFileName) + 4);
-                    if (!path) {
-                        char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
-                        cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
-                        return 1;
-                    }
-                    path[0] = '/';
-                    strcpy(path + 1, data.cFileName);
-                }
-                hash_element = hash(path, strlen(path));
+                while ((web_path_converter = strchr(sub_directory_file_path,'\\')))
+                    *web_path_converter = '/';
+                memmove(sub_directory_file_path + 1, sub_directory_file_path, strlen(sub_directory_file_path));
+                sub_directory_file_path[0] = '/';
+                hash_element = hash(sub_directory_file_path, strlen(sub_directory_file_path));
                 file = malloc(size_file_struct);
                 if (!file) {
                     char* cleanup_array[] = { banned, http_header, webpage_element_loaded, path, NULL };
@@ -202,7 +224,7 @@ int main() {
                 }
                 file->file_content = webpage_element_loaded;
                 file->file_size = webpage_element_size + http_header_size + DATE_SIZE;
-                file->path = path;
+                file->path = sub_directory_file_path;
                 file->next = NULL;
                 nav = server_struct.pages[hash_element];
                 if (nav) {
@@ -216,29 +238,114 @@ int main() {
                 }
                 else
                     server_struct.pages[hash_element] = file;
-                fclose(webpage_element);
                 webpage_element_size = 0;
             }
+            int closed = 0;
+            while(!closed)
+                closed = FindClose(sub_directory_handle);
+        }
+        else {
+            if (strstr(banned, data.cFileName)) {
+                continue;
+            }
+            webpage_element = fopen(data.cFileName, "r");
+            if (!webpage_element) {
+                char* cleanup_array[] = { banned, http_header, NULL };
+                cleanup(&server_struct, cleanup_array, NULL, hFind, 1);
+                return 1;
+            } 
+            while (fgetc(webpage_element) != EOF)
+                webpage_element_size++;
+            if (!webpage_element_size) {
+                fclose(webpage_element);
+                continue;
+            }
+            rewind(webpage_element);
+            http_header_size += (int) floor(log10(webpage_element_size));
+            total_size = webpage_element_size + http_header_size;
+            webpage_element_loaded = malloc(total_size);
+            if (!webpage_element_loaded) {
+                char* cleanup_array[] = { banned, http_header, NULL };
+                cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
+                return 1;
+            }
+            webpage_element_loaded[total_size - 1] = '\0';
+            if (sprintf(webpage_element_loaded, http_header, webpage_element_size, "%s") < 0) {
+                puts("couldn't format page size");
+                char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
+                cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
+                return 1;
+            }
+            if (!fread(&webpage_element_loaded[http_header_size - 1], webpage_element_size, 1, webpage_element)) {
+                char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
+                cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
+                return 1;
+            }
+            http_header_size -= (int)floor(log10(webpage_element_size));
+            if (!strcmp(data.cFileName, "index.html")) {
+                path = malloc(2);
+                if (!path) {
+                    char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
+                    cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
+                    return 1;
+                }
+                path[0] = '/';
+                path[1] = '\0';
+            }
+            else {
+                path = malloc(strlen(data.cFileName) + 4);
+                if (!path) {
+                    char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
+                    cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
+                    return 1;
+                }
+                path[0] = '/';
+                strcpy(path + 1, data.cFileName);
+            }
+            hash_element = hash(path, strlen(path));
+            file = malloc(size_file_struct);
+            if (!file) {
+                char* cleanup_array[] = { banned, http_header, webpage_element_loaded, path, NULL };
+                cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
+                return 1;
+            }
+            file->file_content = webpage_element_loaded;
+            file->file_size = webpage_element_size + http_header_size + DATE_SIZE;
+            file->path = path;
+            file->next = NULL;
+            nav = server_struct.pages[hash_element];
+            if (nav) {
+                while (nav){
+                    if (nav->next)
+                        nav = nav->next;
+                    else
+                        break;
+                }
+                nav->next = file;
+            }
+            else
+                server_struct.pages[hash_element] = file;
+            fclose(webpage_element);
+            webpage_element_size = 0;
         }
     }
     int closed = 0;
     while (!closed)
         closed = FindClose(hFind);
-    //listening for requests
-    char command = '\0';
-    HANDLE thread = CreateThread(NULL, 0, server_command_line, &command, 0, NULL);
+    free(http_header);
+    free(banned);
+    HANDLE command_line = CreateThread(NULL, 0, server_command_line, NULL, 0, NULL);
     int timeout = 2;
     fd_set set;
     FD_SET(server, &set);
-    TIMEVAL tv = {500, 0 };
+    TIMEVAL tv = {1, 0 };
     select(0, &set, NULL, NULL, &tv);
-    setsockopt(server, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));;
-    while (command != 'q') {
-        HANDLE thread = CreateThread(NULL, 0, manage_request, &server_struct, 0, NULL);
+    setsockopt(server, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    while (WaitForSingleObject(command_line ,0) != WAIT_OBJECT_0){
+        HANDLE manage_request_thread = CreateThread(NULL, 0, manage_request, &server_struct, 0, NULL);
+        Sleep(100);
     }
-    Sleep(4000);
-    char* cleanup_array[] = {http_header, banned};
-    cleanup(&server_struct, cleanup_array, NULL, NULL, 1);
+    cleanup(&server_struct, NULL, NULL, NULL, 1);
     return 0;
 }
 
@@ -307,12 +414,10 @@ DWORD WINAPI manage_request(LPVOID manage_request_helper_received) {
         ExitThread(0);
 }
 
-DWORD WINAPI server_command_line(LPVOID command) {
+DWORD WINAPI server_command_line(LPVOID null) {
     while (1) {
-        if (getchar() == 'q') {
-            *(char *)command = 'q';
+        if (getchar() == 'q')
             ExitThread(0);
-        }
     }
 }
 
