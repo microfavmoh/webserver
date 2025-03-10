@@ -1,3 +1,10 @@
+/*
+TODO:
+    add code to make the server send text/javascript
+    add code to send text/css to the browser
+    add code to correctly shutdown the webserver
+    add a condition to give one extra byte for html files
+*/
 #include <WinSock2.h>
 #include <Windows.h>
 #include <stdio.h>
@@ -12,8 +19,8 @@
 
 typedef struct file_struct {
     int file_size;
-    char* path;
-    char* file_content;
+    char *path;
+    char *file_content;
     struct file_struct* next;
 }file_struct;
 // this structure is passed into the manage request thread
@@ -21,41 +28,42 @@ typedef struct file_struct {
 typedef struct webserver {
     SOCKET* server;
     file_struct* pages[HASHMAP_SIZE];
+    file_struct *error_404;
 }webserver;
 
 DWORD WINAPI manage_request(LPVOID manage_request_helper_received);
 DWORD WINAPI server_command_line(LPVOID null);
-void cleanup(webserver *server_struct, char* buffer[], FILE* file, HANDLE* handle, int wsacleanup);
+void cleanup(webserver *server_struct, char *buffer[], FILE* file, HANDLE* handle, int wsacleanup);
 unsigned int hash(void* key, int len);
 
 int main() {
     #pragma comment(lib, "Ws2_32.lib")
-    //reading index.html and adding http header to it
     WSADATA wsadata;
+    //initiating the use of the Winsock DLL by a server
     if (WSAStartup(MAKEWORD(2, 2), &wsadata)) {
         printf("couldn't initiate the use of the Winsock DLL by a server error code: %i", WSAGetLastError());
         return 1;
     }
-    //initiating the use of the Winsock DLL by a server
+    //creating server socket
     SOCKET server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (server == INVALID_SOCKET) {
         printf("couldn't start server socket error code : %i", WSAGetLastError());
         WSACleanup();
         return 1;
     }
-    //creating server socket
     webserver server_struct = { NULL };
     server_struct.server = &server;
     struct sockaddr_in addr = { 0 };
     addr.sin_family = AF_INET;
     addr.sin_port = htons(80);
     addr.sin_addr.s_addr = INADDR_ANY;
+    //binding server socket
     if (bind(server, (struct sockaddr*)&addr, sizeof(addr))) {
         printf("couldn't bind server socket error code : %i", WSAGetLastError());
         cleanup(&server_struct, NULL, NULL, NULL, 1);
         return 1;
     }
-    //binding server socket
+    //listening for requests
     if (listen(server, SOMAXCONN)) {
         printf("couldn't start listening for requests error code : %i", WSAGetLastError());
         cleanup(&server_struct, NULL, NULL, NULL, 1);
@@ -71,7 +79,7 @@ int main() {
     while (fgetc(header) != EOF)
         http_header_size++;
     rewind(header);
-    char* http_header = malloc(http_header_size);
+    char *http_header = malloc(http_header_size);
     if (!http_header) {
         puts("couldn't allocate memory for the http header");
         cleanup(&server_struct, NULL, header, NULL, 1);
@@ -81,7 +89,7 @@ int main() {
     http_header[http_header_size - 1] = '\0';
     if (!fread(http_header, http_header_size, 1, header)) {
         puts("couldn't read from header");
-        char* cleanup_array[] = { http_header , NULL };
+        char *cleanup_array[] = { http_header , NULL };
         cleanup(&server_struct, cleanup_array, header, NULL, 1);
         return 1;
     }
@@ -90,7 +98,7 @@ int main() {
     //the files that can't be sent to the client
     if (!banned_file) {
         puts("couldn't open the list of banned names");
-        char* cleanup_array[] = { http_header, NULL };
+        char *cleanup_array[] = { http_header, NULL };
         cleanup(&server_struct, cleanup_array, NULL, NULL, 1);
         return 1;
     }
@@ -98,17 +106,17 @@ int main() {
     while (fgetc(banned_file) != EOF)
         banned_size++;
     rewind(banned_file);
-    char* banned = malloc(banned_size);
+    char *banned = malloc(banned_size);
     if (!banned) {
         puts("couldn't allocate memory for banned list");
-        char* cleanup_array[] = { http_header , NULL };
+        char *cleanup_array[] = { http_header , NULL };
         cleanup(&server_struct, cleanup_array, banned_file, NULL, 1);
         return 1;
     }
     banned[banned_size - 1] = '\0';
     if (!fread(banned, banned_size, 1, banned_file)) {
         puts("couldn't read banned.txt");
-        char* cleanup_array[] = { banned, http_header, NULL };
+        char *cleanup_array[] = { banned, http_header, NULL };
         cleanup(&server_struct, cleanup_array, banned_file, NULL, 1);
         return 1;
     }
@@ -116,14 +124,14 @@ int main() {
     WIN32_FIND_DATAA data;
     HANDLE hFind = FindFirstFile(".\\*", &data);
     if (hFind == INVALID_HANDLE_VALUE || hFind == ERROR_FILE_NOT_FOUND) {
-        char* cleanup_array[] = { banned, http_header, NULL };
+        char *cleanup_array[] = { banned, http_header, NULL };
         cleanup(&server_struct, cleanup_array, NULL, NULL, 1);
         return 1;
     }
     FILE* webpage_element = NULL;
     int webpage_element_size = 0;
-    char* webpage_element_loaded = NULL;
-    char* path = NULL;
+    char *webpage_element_loaded = NULL;
+    char *path = NULL;
     int total_size;
     int path_size;
     file_struct* file = NULL;
@@ -134,10 +142,13 @@ int main() {
     WIN32_FIND_DATAA sub_directory_data;
     HANDLE sub_directory_handle;
     //a path for a file inside the directory;
-    char* sub_directory_file_path;
-    char* sub_directory_path;
+    char *sub_directory_file_path = NULL;
+    char *sub_directory_path = NULL;
     int len_sub_directory_name;
-    char *web_path_converter;
+    //coverts the windows system file path to webpagepath instead of allocating more memory
+    char *web_path_converter = NULL;
+    //the file extension (.exe for example) of the file
+    char *file_extension = NULL;
     while (FindNextFile(hFind, &data)) {
         if (*data.cFileName == '.') {
             continue;
@@ -146,7 +157,7 @@ int main() {
             len_sub_directory_name = strlen(data.cFileName);
             sub_directory_path = malloc(5 + len_sub_directory_name);
             if (!sub_directory_path) {
-                char* cleanup_array[] = { banned, http_header, NULL };
+                char *cleanup_array[] = { banned, http_header, NULL };
                 cleanup(&server_struct, cleanup_array, NULL, hFind, 1);
                 return 1;
             }
@@ -156,7 +167,7 @@ int main() {
             sub_directory_path[len_sub_directory_name + 4] = '\0';
             sub_directory_handle = FindFirstFile(sub_directory_path, &sub_directory_data);
             if (sub_directory_handle == INVALID_HANDLE_VALUE || sub_directory_handle == ERROR_FILE_NOT_FOUND) {
-                char* cleanup_array[] = { banned, http_header,sub_directory_path, NULL };
+                char *cleanup_array[] = { banned, http_header,sub_directory_path, NULL };
                 cleanup(&server_struct, cleanup_array, hFind, NULL, 1);
                 return 1;
             }
@@ -172,13 +183,13 @@ int main() {
                 sprintf(sub_directory_file_path, "%s\\%s", data.cFileName ,sub_directory_data.cFileName);
                 webpage_element = fopen(sub_directory_file_path, "r");
                 if (!webpage_element) {
-                    char* cleanup_array[] = { banned, http_header,sub_directory_file_path, NULL };
+                    char *cleanup_array[] = { banned, http_header,sub_directory_file_path, NULL };
                     cleanup(&server_struct, cleanup_array, hFind, NULL, 1);
                     FindClose(sub_directory_handle);
                     return 1;
                 }
                 if (!webpage_element) {
-                    char* cleanup_array[] = { banned, http_header, NULL };
+                    char *cleanup_array[] = { banned, http_header, NULL };
                     cleanup(&server_struct, cleanup_array, NULL, hFind, 1);
                     return 1;
                 } 
@@ -193,19 +204,19 @@ int main() {
                 total_size = webpage_element_size + http_header_size;
                 webpage_element_loaded = malloc(total_size);
                 if (!webpage_element_loaded) {
-                    char* cleanup_array[] = { banned, http_header, NULL };
+                    char *cleanup_array[] = { banned, http_header, NULL };
                     cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
                     return 1;
                 }
                 webpage_element_loaded[total_size - 1] = '\0';
                 if (sprintf(webpage_element_loaded, http_header, webpage_element_size, "%s") < 0) {
                     puts("couldn't format page size");
-                    char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
+                    char *cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
                     cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
                     return 1;
                 }
                 if (!fread(&webpage_element_loaded[http_header_size - 1], webpage_element_size, 1, webpage_element)) {
-                    char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
+                    char *cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
                     cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
                     return 1;
                 }
@@ -215,10 +226,27 @@ int main() {
                     *web_path_converter = '/';
                 memmove(sub_directory_file_path + 1, sub_directory_file_path, strlen(sub_directory_file_path));
                 sub_directory_file_path[0] = '/';
+                if (!strcmp(sub_directory_data.cFileName, "index.html")){
+                    for (int i = 0; sub_directory_file_path[i] != '\0'; i++){
+                        if (sub_directory_file_path[i] == '/'){
+                            web_path_converter = &sub_directory_file_path[i];
+                        }
+                    }
+                    *web_path_converter = '\0';
+                }
+                else{
+                    for (int i = 0; sub_directory_file_path[i] != '\0'; i++){
+                        if (sub_directory_file_path[i] == '.'){
+                            file_extension = &(sub_directory_file_path[i]);
+                        }
+                    }
+                    if (!strcmp(file_extension, ".html"))
+                        *file_extension = '\0'; 
+                }
                 hash_element = hash(sub_directory_file_path, strlen(sub_directory_file_path));
                 file = malloc(size_file_struct);
                 if (!file) {
-                    char* cleanup_array[] = { banned, http_header, webpage_element_loaded, path, NULL };
+                    char *cleanup_array[] = { banned, http_header, webpage_element_loaded, path, NULL };
                     cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
                     return 1;
                 }
@@ -250,7 +278,7 @@ int main() {
             }
             webpage_element = fopen(data.cFileName, "r");
             if (!webpage_element) {
-                char* cleanup_array[] = { banned, http_header, NULL };
+                char *cleanup_array[] = { banned, http_header, NULL };
                 cleanup(&server_struct, cleanup_array, NULL, hFind, 1);
                 return 1;
             } 
@@ -265,19 +293,19 @@ int main() {
             total_size = webpage_element_size + http_header_size;
             webpage_element_loaded = malloc(total_size);
             if (!webpage_element_loaded) {
-                char* cleanup_array[] = { banned, http_header, NULL };
+                char *cleanup_array[] = { banned, http_header, NULL };
                 cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
                 return 1;
             }
             webpage_element_loaded[total_size - 1] = '\0';
             if (sprintf(webpage_element_loaded, http_header, webpage_element_size, "%s") < 0) {
                 puts("couldn't format page size");
-                char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
+                char *cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
                 cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
                 return 1;
             }
             if (!fread(&webpage_element_loaded[http_header_size - 1], webpage_element_size, 1, webpage_element)) {
-                char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
+                char *cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
                 cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
                 return 1;
             }
@@ -285,17 +313,44 @@ int main() {
             if (!strcmp(data.cFileName, "index.html")) {
                 path = malloc(2);
                 if (!path) {
-                    char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
+                    char *cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
                     cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
                     return 1;
                 }
                 path[0] = '/';
                 path[1] = '\0';
             }
+            else if (!strcmp(data.cFileName, "404.html")) {
+                file = malloc(size_file_struct);
+                if (!file){
+                    char *cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
+                    cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
+                    return 1;
+                }
+                webpage_element_loaded = realloc(webpage_element_loaded, webpage_element_size + http_header_size + 7);
+                if (!webpage_element_loaded){
+                    free(file);
+                    char *cleanup_array[] = {banned, http_header, webpage_element_loaded, NULL };
+                    cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
+                    return 1;
+                }
+                char *code  = strstr(webpage_element_loaded, "200");
+                memmove(code + 7, code, webpage_element_size + http_header_size);
+                strcpy(code, "404 Not Found");
+                code[13] = '\n';
+                file -> file_content = webpage_element_loaded;
+                file -> file_size = webpage_element_size + http_header_size + DATE_SIZE + 7;
+                file -> next = NULL;
+                file -> path = NULL;
+                server_struct.error_404 = file;
+                fclose(webpage_element);
+                webpage_element_size = 0;
+                continue;
+            }
             else {
                 path = malloc(strlen(data.cFileName) + 4);
                 if (!path) {
-                    char* cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
+                    char *cleanup_array[] = { banned, http_header, webpage_element_loaded, NULL };
                     cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
                     return 1;
                 }
@@ -305,7 +360,7 @@ int main() {
             hash_element = hash(path, strlen(path));
             file = malloc(size_file_struct);
             if (!file) {
-                char* cleanup_array[] = { banned, http_header, webpage_element_loaded, path, NULL };
+                char *cleanup_array[] = { banned, http_header, webpage_element_loaded, path, NULL };
                 cleanup(&server_struct, cleanup_array, webpage_element, hFind, 1);
                 return 1;
             }
@@ -340,7 +395,7 @@ int main() {
     FD_SET(server, &set);
     TIMEVAL tv = {1, 0 };
     select(0, &set, NULL, NULL, &tv);
-    setsockopt(server, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    setsockopt(server, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout));
     while (WaitForSingleObject(command_line ,0) != WAIT_OBJECT_0){
         HANDLE manage_request_thread = CreateThread(NULL, 0, manage_request, &server_struct, 0, NULL);
         Sleep(100);
@@ -368,7 +423,7 @@ DWORD WINAPI manage_request(LPVOID manage_request_helper_received) {
     time_t now = time(0);
     struct tm tm = *gmtime(&now);
     strftime(current_time, sizeof(current_time), "%a, %d %b %Y %H:%M:%S %Z", &tm);
-    char* page_requested_path;
+    char *page_requested_path;
     if (!(page_requested_path = strchr(request_buffer, '\n'))) {
         goto close_socket_client;
     }
@@ -382,17 +437,17 @@ DWORD WINAPI manage_request(LPVOID manage_request_helper_received) {
                 page_requested = page_requested->next;
             }
             else {
+                send(client, manage_request_helper_pointer -> error_404 -> file_content, manage_request_helper_pointer -> error_404 -> file_size, 0);
                 goto close_socket_client;
-                //add code to send 404page
             }
         }
     }
     else {
+        send(client, manage_request_helper_pointer -> error_404 -> file_content, manage_request_helper_pointer -> error_404 -> file_size, 0);
         goto close_socket_client;
-        //add code to send 404page
     }
     int page_size = page_requested->file_size;
-    char* page_date = malloc(page_size);
+    char *page_date = malloc(page_size);
     if (!page_date) {
         puts("couldn't allocate memory for page");
         goto close_socket_client;
@@ -406,10 +461,10 @@ DWORD WINAPI manage_request(LPVOID manage_request_helper_received) {
         printf("couldn't send data error code: %i", WSAGetLastError());
         goto cleanup_label;
     }
-    Sleep(100);
     cleanup_label:
         free(page_date);
     close_socket_client:
+        Sleep(100);
         closesocket(client);
         ExitThread(0);
 }
@@ -421,7 +476,7 @@ DWORD WINAPI server_command_line(LPVOID null) {
     }
 }
 
-void cleanup(webserver* server_struct, char* buffer[], FILE* file, HANDLE* handle, int wsacleanup) {
+void cleanup(webserver* server_struct, char *buffer[], FILE* file, HANDLE* handle, int wsacleanup) {
     if (buffer) {
         for (int i = 0; buffer[i] != NULL; i++) {
             free(buffer[i]);
@@ -452,12 +507,16 @@ void cleanup(webserver* server_struct, char* buffer[], FILE* file, HANDLE* handl
                 free(freer_copy);
             }
         }
+        if (server_struct -> error_404){
+            free(server_struct -> error_404 -> file_content);
+            free(server_struct -> error_404);
+        }
     }
 }
 
 unsigned int hash(void* key, int len)
 {
-    unsigned char* p = key;
+    unsigned char *p = key;
     unsigned h = 0;
     int i;
     for (i = 0; i < len; i++) {
