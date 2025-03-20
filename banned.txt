@@ -1,6 +1,0 @@
-banned.txt
-header.txt
-hello.c
-test.c
-webserver.c
-webserver.exe
