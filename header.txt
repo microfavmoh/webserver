@@ -2,6 +2,6 @@ HTTP/1.1 200 OK
 Connection: Keep-Alive
 Keep-Alive: timeout=0 max=2
 Content-Length: %i
-Content-Type: text/html; charset=UTF-8
+Content-Type: %s
 Date: %s
 
