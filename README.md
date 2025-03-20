@@ -7,4 +7,4 @@ which contains the http header which is currently not customizable and can be fo
 # Note:
 the current version of the webserver isn't fit for production code and doesn't use https
 ## Building
-if you for some reason still want to check out this project go ahead
+if you for some reason still want to check out this project go ahead fork the repository and build the project
