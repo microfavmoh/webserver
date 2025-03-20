@@ -5,3 +5,5 @@ in this file there will be the names of the files that won't be loaded by the we
 ## header.txt
 which contains the http header which is currently not customizable
 and can be found in the repositiory
+# Note:
+the current version of the webserver isn't fit for production code
