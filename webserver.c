@@ -1,6 +1,9 @@
 /*
 TODO:
     add code to format dates in webpage
+    add support for image and binary files
+    add support for ipv6
+    add https
 */
 #include <WinSock2.h>
 #include <Windows.h>
