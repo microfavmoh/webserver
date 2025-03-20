@@ -5,6 +5,7 @@ TODO:
     add support for ipv6
     add https
 */
+// Note: if upon running the program crashes please change the HASHMAP_SIZE constant to a lower value
 #include <WinSock2.h>
 #include <Windows.h>
 #include <Shlwapi.h>
