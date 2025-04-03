@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(webserver)
+include_directories(lib)
+file(GLOB_RECURSE MY_SOURCES "src/*.c")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ../../../)
+add_executable(webserver "${MY_SOURCES}")
