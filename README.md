@@ -7,7 +7,6 @@ to clone the repository open a terminal and run the command
 git clone https://github.com/microfavmoh/webserver.git
 ```
 ## 2 - Building
-open a terminal in the build directory and run the command
 ```
 cd webserver/build
 cmake ..
