@@ -9,6 +9,7 @@ git clone https://github.com/microfavmoh/webserver.git
 ## 2 - Building
 open a terminal in the build directory and run the command
 ```
+cd webserver/build
 cmake ..
 ```
 this will produce the solution file on windows and the makefile on linux 
